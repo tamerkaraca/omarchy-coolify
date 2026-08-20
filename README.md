@@ -9,7 +9,11 @@ alerts when an application stops or recovers.
 - In-plugin setup page for the Coolify panel URL and API key (English/Turkish UI)
 - API key stored outside the repository in a mode `0600` user config file
 - Servers, projects, and resource counts in a native Omarchy popup
-- Per-project application list with domains; open or copy URLs from the keyboard
+- Per-project lists grouped into Applications, Services, and Databases; each
+  section only appears when the project has resources of that kind
+- Open or copy application URLs from the keyboard; services and databases
+  open their Coolify project page
+- Service and database names are cleaned of the UUID suffix Coolify appends
 - j/k selection, o open, c copy, r refresh, s settings, ? shortcuts
 - Desktop notification and a warning sound on healthy-to-down changes and recoveries
 - No alert storm on first launch
@@ -37,10 +41,12 @@ The private configuration is stored at:
 
 ## Project grouping
 
-Coolify's MCP `list_applications` response currently omits the parent project
-UUID, so the plugin keeps an optional `PROJECT_BY_APP` mapping
-(application UUID → project UUID) in `plugin/coolify_mcp.py`. It ships empty:
-add your own pairs if applications do not appear under their projects.
+Resources are grouped under their project using the `project_uuid` field
+that Coolify's MCP `list_applications`, `list_services`, and `list_databases`
+responses carry. Older Coolify releases omitted that field for applications,
+so `plugin/coolify_mcp.py` still ships a `PROJECT_BY_APP` mapping
+(application UUID → project UUID) as a manual override; it stays empty unless
+you run such an old version.
 
 ## Development
 

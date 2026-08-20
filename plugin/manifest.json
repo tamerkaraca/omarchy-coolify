@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "community.coolify",
   "name": "Coolify",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Tamer Karaca",
   "license": "MIT",
   "description": "Coolify proje ve uygulamalarını MCP üzerinden gösterir; hızlı URL erişimi ve durum bildirimleri sağlar.",

@@ -14,6 +14,7 @@ private API token. Subcommands:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -98,9 +99,9 @@ def effective_language(config: dict) -> str:
     return chosen if chosen in LANGUAGES else detect_language()
 
 
-# Coolify's current MCP application summary omits the parent project UUID.
-# Map your own application UUID -> project UUID pairs here until that field
-# is exposed by MCP. Unmapped applications are not grouped under a project.
+# Coolify's MCP resource summaries now include project_uuid, so resources are
+# grouped automatically. Keep this map only as a manual override for older
+# Coolify versions whose list_applications omitted the parent project UUID.
 PROJECT_BY_APP = {
 }
 
@@ -244,6 +245,13 @@ def app_display_name(app):
     return name.split(":", 1)[0]
 
 
+def short_resource_name(name):
+    # Service and database names carry a "-<uuid>" suffix Coolify appends;
+    # strip it so the panel shows the human-chosen name only.
+    value = str(name or "")
+    return re.sub(r"-[a-z0-9]{16,}$", "", value) or value
+
+
 def notify(title, body, critical=False):
     subprocess.run(
         ["notify-send", "-u", "critical" if critical else "normal", "-a", "Coolify", "-i", ICON, title, body],
@@ -304,21 +312,39 @@ def overview(config, lang):
     post(endpoint, token, {"jsonrpc": "2.0", "method": "notifications/initialized"}, session)
     data = tool_data(endpoint, token, session, 2, lang, "get_infrastructure_overview")
     applications = tool_data(endpoint, token, session, 3, lang, "list_applications", {"page": 1, "per_page": 100})
+    services = tool_data(endpoint, token, session, 4, lang, "list_services", {"page": 1, "per_page": 100})
+    databases = tool_data(endpoint, token, session, 5, lang, "list_databases", {"page": 1, "per_page": 100})
     applications = applications if isinstance(applications, list) else []
+    services = services if isinstance(services, list) else []
+    databases = databases if isinstance(databases, list) else []
     notify_transitions(applications, lang)
-    by_project = {}
-    for app in applications:
-        app = dict(app)
-        app["display_name"] = app_display_name(app)
-        app["urls"] = [url.strip() for url in str(app.get("fqdn") or "").split(",") if url.strip()]
-        app["primary_url"] = app["urls"][0] if app["urls"] else ""
-        project_uuid = PROJECT_BY_APP.get(str(app.get("uuid") or ""), "")
-        by_project.setdefault(project_uuid, []).append(app)
+
+    def group(items, kind):
+        by_project = {}
+        for item in items:
+            item = dict(item)
+            uuid = str(item.get("uuid") or "")
+            project_uuid = str(item.get("project_uuid") or PROJECT_BY_APP.get(uuid, ""))
+            item["display_name"] = app_display_name(item) if kind == "application" else short_resource_name(item.get("name"))
+            item["urls"] = [url.strip() for url in str(item.get("fqdn") or "").split(",") if url.strip()]
+            item["primary_url"] = item["urls"][0] if item["urls"] else ""
+            status = str(item.get("status") or "")
+            item["status_label"] = status.rsplit(":", 1)[-1] if status else ""
+            by_project.setdefault(project_uuid, []).append(item)
+        return by_project
+
+    apps_by_project = group(applications, "application")
+    services_by_project = group(services, "service")
+    databases_by_project = group(databases, "database")
+
+    def by_name(items):
+        return sorted(items, key=lambda item: str(item.get("display_name", "")).casefold())
+
     for project in data.get("projects", []):
-        project["applications"] = sorted(
-            by_project.get(str(project.get("uuid") or ""), []),
-            key=lambda app: app.get("display_name", "").casefold(),
-        )
+        project_uuid = str(project.get("uuid") or "")
+        project["applications"] = by_name(apps_by_project.get(project_uuid, []))
+        project["services"] = by_name(services_by_project.get(project_uuid, []))
+        project["databases"] = by_name(databases_by_project.get(project_uuid, []))
     data["dashboard"] = site_url + "/"
     data["refreshSeconds"] = int(config.get("refresh_seconds", 30))
     return data

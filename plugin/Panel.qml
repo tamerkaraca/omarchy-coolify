@@ -37,8 +37,14 @@ Panel {
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property bool settingsVisible: editingSettings || (configLoaded && !configured)
+  readonly property var projectResources: {
+    var apps = selectedProject && selectedProject.applications ? selectedProject.applications : []
+    var services = selectedProject && selectedProject.services ? selectedProject.services : []
+    var databases = selectedProject && selectedProject.databases ? selectedProject.databases : []
+    return { apps: apps, services: services, databases: databases }
+  }
   readonly property int itemCount: viewMode === "apps"
-    ? (selectedProject && selectedProject.applications ? selectedProject.applications.length : 0)
+    ? projectResources.apps.length + projectResources.services.length + projectResources.databases.length
     : servers.length + projects.length
 
   readonly property var translations: ({
@@ -51,7 +57,7 @@ Panel {
       openTip: "Open selected (o)",
       appsTitle: "Applications",
       countServer: "Server", countProject: "Project", countApplication: "Application", countService: "Service", countDb: "DB",
-      serversHeader: "Servers", projectsHeader: "Projects", appsHeader: "Applications",
+      serversHeader: "Servers", projectsHeader: "Projects", appsHeader: "Applications", servicesHeader: "Services", databasesHeader: "Databases",
       serverFallback: "Server", projectFallback: "Project", appFallback: "Application",
       appWord: "app", serviceWord: "service", dbWord: "DB",
       noDomain: "No domain defined",
@@ -86,7 +92,7 @@ Panel {
       openTip: "Seçileni aç (o)",
       appsTitle: "Uygulamalar",
       countServer: "Sunucu", countProject: "Proje", countApplication: "Uygulama", countService: "Servis", countDb: "DB",
-      serversHeader: "Sunucular", projectsHeader: "Projeler", appsHeader: "Uygulamalar",
+      serversHeader: "Sunucular", projectsHeader: "Projeler", appsHeader: "Uygulamalar", servicesHeader: "Servisler", databasesHeader: "Veritabanları",
       serverFallback: "Sunucu", projectFallback: "Proje", appFallback: "Uygulama",
       appWord: "app", serviceWord: "servis", dbWord: "DB",
       noDomain: "Alan adı tanımlı değil",
@@ -227,11 +233,22 @@ Panel {
     if (root.opened && configLoaded && !configured) Qt.callLater(function() { endpointField.forceActiveFocus() })
   }
 
+  function resourceAt(index) {
+    if (viewMode !== "apps" || !selectedProject) return null
+    var apps = projectResources.apps
+    if (index < apps.length) return apps[index]
+    var services = projectResources.services
+    var serviceIndex = index - apps.length
+    if (serviceIndex < services.length) return services[serviceIndex]
+    var databases = projectResources.databases
+    var databaseIndex = serviceIndex - services.length
+    return databaseIndex >= 0 && databaseIndex < databases.length ? databases[databaseIndex] : null
+  }
+
   function selectedValue() {
     if (viewMode === "apps") {
-      var apps = selectedProject && selectedProject.applications ? selectedProject.applications : []
-      var app = apps[cursor]
-      return app ? String(app.primary_url || app.fqdn || app.name || "") : ""
+      var item = resourceAt(cursor)
+      return item ? String(item.primary_url || item.fqdn || item.display_name || item.name || "") : ""
     }
     if (cursor < servers.length) {
       var server = servers[cursor]
@@ -270,6 +287,8 @@ Panel {
   function openApplication(app) {
     if (!app) return
     var url = String(app.primary_url || "")
+    // Services and databases have no public URL — open their Coolify project page instead.
+    if (url === "" && selectedProject && dashboard !== "") url = dashboard + "project/" + selectedProject.uuid
     if (url === "") return
     Quickshell.execDetached(["xdg-open", url])
     close()
@@ -277,8 +296,7 @@ Panel {
 
   function activateSelected() {
     if (viewMode === "apps") {
-      var apps = selectedProject && selectedProject.applications ? selectedProject.applications : []
-      openApplication(apps[cursor])
+      openApplication(resourceAt(cursor))
       return
     }
     if (cursor >= servers.length) openProject(projects[cursor - servers.length])
@@ -609,9 +627,9 @@ Panel {
           Text { visible: root.viewMode === "overview"; text: root.t.projectsHeader; color: root.dim; font.family: root.fontFamily; font.bold: true; topPadding: Style.space(8) }
           Repeater {
             model: root.viewMode === "overview" ? root.projects : []
-            ItemRow { required property var modelData; required property int index; title: String(modelData.name || root.t.projectFallback); detail: Number((modelData.applications || []).length) + " " + root.t.appWord + " · " + Number((modelData.counts || {}).services || 0) + " " + root.t.serviceWord + " · " + Number((modelData.counts || {}).databases || 0) + " " + root.t.dbWord; healthy: true; actionIcon: "󰅂"; selected: root.cursor === root.servers.length + index; onChosen: { root.cursor = root.servers.length + index; root.openProject(modelData) } }
+            ItemRow { required property var modelData; required property int index; title: String(modelData.name || root.t.projectFallback); detail: Number((modelData.applications || []).length) + " " + root.t.appWord + " · " + Number((modelData.services || []).length || (modelData.counts || {}).services || 0) + " " + root.t.serviceWord + " · " + Number((modelData.databases || []).length || (modelData.counts || {}).databases || 0) + " " + root.t.dbWord; healthy: true; actionIcon: "󰅂"; selected: root.cursor === root.servers.length + index; onChosen: { root.cursor = root.servers.length + index; root.openProject(modelData) } }
           }
-          Text { visible: root.viewMode === "apps"; text: root.t.appsHeader; color: root.dim; font.family: root.fontFamily; font.bold: true }
+          Text { visible: root.viewMode === "apps" && root.projectResources.apps.length > 0; text: root.t.appsHeader; color: root.dim; font.family: root.fontFamily; font.bold: true }
           Repeater {
             model: root.viewMode === "apps" && root.selectedProject ? (root.selectedProject.applications || []) : []
             ItemRow {
@@ -623,6 +641,34 @@ Panel {
               actionIcon: modelData.primary_url ? "󰖟" : "󰅙"
               selected: root.cursor === index
               onChosen: { root.cursor = index; root.openApplication(modelData) }
+            }
+          }
+          Text { visible: root.viewMode === "apps" && root.projectResources.services.length > 0; text: root.t.servicesHeader; color: root.dim; font.family: root.fontFamily; font.bold: true; topPadding: Style.space(8) }
+          Repeater {
+            model: root.viewMode === "apps" && root.selectedProject ? (root.selectedProject.services || []) : []
+            ItemRow {
+              required property var modelData
+              required property int index
+              title: String(modelData.display_name || modelData.name || root.t.serviceWord)
+              detail: String(modelData.status_label || "")
+              healthy: String(modelData.status || "").indexOf("running:healthy") !== -1
+              actionIcon: "󰅙"
+              selected: root.cursor === root.projectResources.apps.length + index
+              onChosen: { root.cursor = root.projectResources.apps.length + index; root.openApplication(modelData) }
+            }
+          }
+          Text { visible: root.viewMode === "apps" && root.projectResources.databases.length > 0; text: root.t.databasesHeader; color: root.dim; font.family: root.fontFamily; font.bold: true; topPadding: Style.space(8) }
+          Repeater {
+            model: root.viewMode === "apps" && root.selectedProject ? (root.selectedProject.databases || []) : []
+            ItemRow {
+              required property var modelData
+              required property int index
+              title: String(modelData.display_name || modelData.name || root.t.dbWord)
+              detail: String(modelData.type || modelData.status_label || "")
+              healthy: String(modelData.status || "").indexOf("running:healthy") !== -1
+              actionIcon: "󰅙"
+              selected: root.cursor === root.projectResources.apps.length + root.projectResources.services.length + index
+              onChosen: { root.cursor = root.projectResources.apps.length + root.projectResources.services.length + index; root.openApplication(modelData) }
             }
           }
 
